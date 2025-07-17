@@ -1,41 +1,37 @@
-import fetch from 'node-fetch';
+const axios = require('axios');
 
-export default async function handler(req, res) {
+module.exports = async (req, res) => {
   const { reg } = req.query;
 
   if (!reg) {
-    return res.status(400).json({ error: 'Missing reg parameter' });
+    return res.status(400).json({ error: 'Missing registration number' });
   }
 
   try {
-    // Step 1: Get K-Type from UKVehicleData
-    const apiKey = '944ee147-f327-48d6-a86f-8d9391baefbd'; // 🔐 your API key
-    const response = await fetch(`https://uk1.ukvehicledata.co.uk/api/datapackage/VehicleData?v=2&api_nullitems=1&auth_apikey=${apiKey}&user_tag=&key_VRM=${reg}`);
-    const data = await response.json();
+    // Fetch K-Type from UKVehicleData
+    const ukvdResponse = await axios.get('https://v2.api.ukvehicledata.co.uk/r2/lookup', {
+      params: {
+        api_nullitems: '1',
+        user_tag: 'ktype-check',
+        key_vrm: reg,
+        api_key: process.env.UKVD_API_KEY
+      }
+    });
 
-    const kType = data?.Response?.DataItems?.VehicleRegistration?.KType;
-    if (!kType) {
+    const ktype = ukvdResponse?.data?.Response?.DataItems?.VehicleRegistration?.KType;
+
+    if (!ktype) {
       return res.status(404).json({ error: 'K-Type not found for reg' });
     }
 
-    // Step 2: Load JSON of k_type_to_partnumber
-    const mapRes = await fetch('https://ktype-product-map.vercel.app/k_type_to_partnumber.json');
-    const kTypeMap = await mapRes.json();
+    // Fetch mapping file
+    const skuResponse = await axios.get('https://ktype-product-map.vercel.app/k_type_to_partnumber.json');
 
-    const skuList = kTypeMap[kType];
+    const skuList = skuResponse.data[String(ktype)] || [];
 
-    if (!skuList || skuList.length === 0) {
-      return res.status(404).json({ error: 'No SKUs found for this K-Type' });
-    }
-
-    // Step 3: Return list of SKUs
-    return res.status(200).json({
-      k_type: kType,
-      skus: skuList
-    });
-
+    return res.status(200).json({ ktype, skus: skuList });
   } catch (err) {
-    console.error(err);
-    return res.status(500).json({ error: 'Server error' });
+    console.error('Lookup error:', err.message || err);
+    return res.status(500).json({ error: 'Internal server error', detail: err.message });
   }
-}
+};
