@@ -1,49 +1,41 @@
 import fetch from 'node-fetch';
 
-const KTYPE_JSON_URL = 'https://ktype-product-map.vercel.app/k_type_to_partnumber.json';
-const COLLECTION_URL = 'https://townparts.co.uk/collections/all';
-
 export default async function handler(req, res) {
-  const { reg, make, model } = req.query;
+  const { reg } = req.query;
+
+  if (!reg) {
+    return res.status(400).json({ error: 'Missing reg parameter' });
+  }
 
   try {
-    let ktype = null;
+    // Step 1: Get K-Type from UKVehicleData
+    const apiKey = '944ee147-f327-48d6-a86f-8d9391baefbd'; // 🔐 your API key
+    const response = await fetch(`https://uk1.ukvehicledata.co.uk/api/datapackage/VehicleData?v=2&api_nullitems=1&auth_apikey=${apiKey}&user_tag=&key_VRM=${reg}`);
+    const data = await response.json();
 
-    // 🔍 1. Lookup KType via UKVehicleData if reg is supplied
-    if (reg) {
-      const apiKey = '944ee147-f327-48d6-a86f-8d9391baefbd';
-      const response = await fetch(`https://api.ukvehicledata.co.uk/vehicledata/v1/vehicle?key=${apiKey}&licencePlate=${reg}&include=technicaldata`);
-      const data = await response.json();
-
-      if (data?.data?.technicaldata?.datapoints?.ktype) {
-        ktype = data.data.technicaldata.datapoints.ktype.value;
-      } else {
-        return res.redirect(`/pages/manual-vehicle-selector`);
-      }
+    const kType = data?.Response?.DataItems?.VehicleRegistration?.KType;
+    if (!kType) {
+      return res.status(404).json({ error: 'K-Type not found for reg' });
     }
 
-    // 🧰 2. If no reg or failed, use fallback (not implemented yet)
-    if (!ktype && make && model) {
-      // Optionally add fallback logic later
-      return res.redirect(`/pages/manual-vehicle-selector`);
+    // Step 2: Load JSON of k_type_to_partnumber
+    const mapRes = await fetch('https://ktype-product-map.vercel.app/k_type_to_partnumber.json');
+    const kTypeMap = await mapRes.json();
+
+    const skuList = kTypeMap[kType];
+
+    if (!skuList || skuList.length === 0) {
+      return res.status(404).json({ error: 'No SKUs found for this K-Type' });
     }
 
-    // 📦 3. Load JSON mapping
-    const jsonResponse = await fetch(KTYPE_JSON_URL);
-    const ktypeMap = await jsonResponse.json();
-
-    const skus = ktypeMap[ktype];
-    if (!skus || skus.length === 0) {
-      return res.redirect(`/pages/not-found`);
-    }
-
-    // 🔗 4. Build redirect link
-    const skuQuery = skus.map((sku) => encodeURIComponent(sku)).join('+');
-    const finalUrl = `${COLLECTION_URL}?q=${skuQuery}`;
-    return res.redirect(finalUrl);
+    // Step 3: Return list of SKUs
+    return res.status(200).json({
+      k_type: kType,
+      skus: skuList
+    });
 
   } catch (err) {
     console.error(err);
-    return res.status(500).json({ error: 'Something went wrong.' });
+    return res.status(500).json({ error: 'Server error' });
   }
 }
