@@ -1,37 +1,51 @@
-const axios = require('axios');
+// /api/lookup.js
 
-module.exports = async (req, res) => {
-  const { reg } = req.query;
+import axios from 'axios';
 
-  if (!reg) {
-    return res.status(400).json({ error: 'Missing registration number' });
+export default async function handler(req, res) {
+  if (req.method !== 'GET') {
+    return res.status(405).json({ error: 'Method not allowed. Use GET.' });
+  }
+
+  const vrm = req.query.reg;
+  const API_KEY = '944ee147-f327-48d6-a86f-8d9391baefbd';
+  const PACKAGE_NAME = 'VehicleDetails';
+  const API_URL = 'https://uk.api.vehicledataglobal.com/r2/lookup';
+
+  if (!vrm) {
+    return res.status(400).json({ error: 'Missing VRM in query param ?reg=' });
   }
 
   try {
-    // Fetch K-Type from UKVehicleData
-    const ukvdResponse = await axios.get('https://v2.api.ukvehicledata.co.uk/r2/lookup', {
+    const response = await axios.get(API_URL, {
       params: {
-        api_nullitems: '1',
-        user_tag: 'ktype-check',
-        key_vrm: reg,
-        api_key: process.env.UKVD_API_KEY
+        packagename: PACKAGE_NAME,
+        apikey: API_KEY,
+        vrm: vrm
       }
     });
 
-    const ktype = ukvdResponse?.data?.Response?.DataItems?.VehicleRegistration?.KType;
+    const result = response.data;
 
-    if (!ktype) {
-      return res.status(404).json({ error: 'K-Type not found for reg' });
+    // Extract KTypes (adapt structure if needed based on live response)
+    let ktypes = [];
+
+    try {
+      ktypes = result?.Results?.TechnicalDetails?.KType ?? [];
+    } catch (err) {
+      // Optional: log the error
     }
 
-    // Fetch mapping file
-    const skuResponse = await axios.get('https://ktype-product-map.vercel.app/k_type_to_partnumber.json');
+    return res.status(200).json({
+      vrm,
+      ktypes,
+      raw_response: result
+    });
 
-    const skuList = skuResponse.data[String(ktype)] || [];
-
-    return res.status(200).json({ ktype, skus: skuList });
-  } catch (err) {
-    console.error('Lookup error:', err.message || err);
-    return res.status(500).json({ error: 'Internal server error', detail: err.message });
+  } catch (error) {
+    return res.status(500).json({
+      error: 'API error',
+      details: error.response?.data || error.message
+    });
   }
-};
+}
