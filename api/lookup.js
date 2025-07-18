@@ -1,50 +1,60 @@
-const axios = require('axios');
+import axios from 'axios';
 
-module.exports = async function handler(req, res) {
+export default async function handler(req, res) {
   const { reg } = req.query;
 
   if (!reg) {
     return res.status(400).json({ error: 'Missing reg parameter' });
   }
 
+  const API_KEY = '944ee147-f327-48d6-a86f-8d9391baefbd';
+  const PACKAGE_NAME = 'VehicleDetails';
+  const API_URL = 'https://uk.api.vehicledataglobal.com/r2/lookup';
+
   try {
-    // Step 1: Get K-Type from UKVehicleData
-    const apiKey = '944ee147-f327-48d6-a86f-8d9391baefbd';
-    const response = await axios.get(`https://uk1.ukvehicledata.co.uk/api/datapackage/VehicleData`, {
+    // Step 1: Get vehicle data from UKVehicleData API
+    const { data: result } = await axios.get(API_URL, {
       params: {
-        v: 2,
-        api_nullitems: 1,
-        auth_apikey: apiKey,
-        user_tag: '',
-        key_VRM: reg
+        packagename: PACKAGE_NAME,
+        apikey: API_KEY,
+        vrm: reg
       }
     });
 
-    const data = response.data;
-    const kType = data?.Response?.DataItems?.VehicleRegistration?.KType;
-
-    if (!kType) {
-      return res.status(404).json({ error: 'K-Type not found for reg' });
+    // Step 2: Extract KType(s)
+    let ktypes = [];
+    const rawKType = result?.Results?.TechnicalDetails?.KType;
+    if (rawKType) {
+      ktypes = Array.isArray(rawKType) ? rawKType : [rawKType];
     }
 
-    // Step 2: Load JSON of k_type_to_partnumber
+    if (ktypes.length === 0) {
+      return res.status(404).json({ error: 'K-Type not found for reg', raw_response: result });
+    }
+
+    // Step 3: Load JSON map of KType to SKUs
     const mapRes = await axios.get('https://ktype-product-map.vercel.app/k_type_to_partnumber.json');
     const kTypeMap = mapRes.data;
 
-    const skuList = kTypeMap[kType];
-
-    if (!skuList || skuList.length === 0) {
-      return res.status(404).json({ error: 'No SKUs found for this K-Type' });
+    let matchedSKUs = [];
+    for (const k of ktypes) {
+      if (kTypeMap[k]) {
+        matchedSKUs.push(...kTypeMap[k]);
+      }
     }
 
-    // Step 3: Return list of SKUs
+    if (matchedSKUs.length === 0) {
+      return res.status(404).json({ error: 'No SKUs found for these K-Types', ktypes });
+    }
+
     return res.status(200).json({
-      k_type: kType,
-      skus: skuList
+      vrm: reg,
+      ktypes,
+      skus: matchedSKUs
     });
 
   } catch (err) {
-    console.error(err);
+    console.error('Lookup error:', err.message);
     return res.status(500).json({ error: 'Server error', details: err.message });
   }
-};
+}
