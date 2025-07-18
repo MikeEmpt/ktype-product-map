@@ -1,51 +1,50 @@
-// /api/lookup.js
+const axios = require('axios');
 
-import axios from 'axios';
+module.exports = async function handler(req, res) {
+  const { reg } = req.query;
 
-export default async function handler(req, res) {
-  if (req.method !== 'GET') {
-    return res.status(405).json({ error: 'Method not allowed. Use GET.' });
-  }
-
-  const vrm = req.query.reg;
-  const API_KEY = '944ee147-f327-48d6-a86f-8d9391baefbd';
-  const PACKAGE_NAME = 'VehicleDetails';
-  const API_URL = 'https://uk.api.vehicledataglobal.com/r2/lookup';
-
-  if (!vrm) {
-    return res.status(400).json({ error: 'Missing VRM in query param ?reg=' });
+  if (!reg) {
+    return res.status(400).json({ error: 'Missing reg parameter' });
   }
 
   try {
-    const response = await axios.get(API_URL, {
+    // Step 1: Get K-Type from UKVehicleData
+    const apiKey = '944ee147-f327-48d6-a86f-8d9391baefbd';
+    const response = await axios.get(`https://uk1.ukvehicledata.co.uk/api/datapackage/VehicleData`, {
       params: {
-        packagename: PACKAGE_NAME,
-        apikey: API_KEY,
-        vrm: vrm
+        v: 2,
+        api_nullitems: 1,
+        auth_apikey: apiKey,
+        user_tag: '',
+        key_VRM: reg
       }
     });
 
-    const result = response.data;
+    const data = response.data;
+    const kType = data?.Response?.DataItems?.VehicleRegistration?.KType;
 
-    // Extract KTypes (adapt structure if needed based on live response)
-    let ktypes = [];
-
-    try {
-      ktypes = result?.Results?.TechnicalDetails?.KType ?? [];
-    } catch (err) {
-      // Optional: log the error
+    if (!kType) {
+      return res.status(404).json({ error: 'K-Type not found for reg' });
     }
 
+    // Step 2: Load JSON of k_type_to_partnumber
+    const mapRes = await axios.get('https://ktype-product-map.vercel.app/k_type_to_partnumber.json');
+    const kTypeMap = mapRes.data;
+
+    const skuList = kTypeMap[kType];
+
+    if (!skuList || skuList.length === 0) {
+      return res.status(404).json({ error: 'No SKUs found for this K-Type' });
+    }
+
+    // Step 3: Return list of SKUs
     return res.status(200).json({
-      vrm,
-      ktypes,
-      raw_response: result
+      k_type: kType,
+      skus: skuList
     });
 
-  } catch (error) {
-    return res.status(500).json({
-      error: 'API error',
-      details: error.response?.data || error.message
-    });
+  } catch (err) {
+    console.error(err);
+    return res.status(500).json({ error: 'Server error', details: err.message });
   }
-}
+};
