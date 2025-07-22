@@ -1,7 +1,8 @@
 {
   "name": "ktype-product-map",
   "version": "1.0.0",
-  "description": "K-Type to product map API",
+  "description": "K-Type to product map API",  
+"type": "module",   
   "main": "index.js",
   "scripts": {
     "dev": "vercel dev",
