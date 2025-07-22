@@ -8,7 +8,6 @@ export default async function handler(req, res) {
   }
 
   try {
-    // UKVehicleData API call
     const response = await axios.get('https://uk.api.vehicledataglobal.com/r2/lookup', {
       params: {
         packagename: 'VehicleDetails',
@@ -19,16 +18,18 @@ export default async function handler(req, res) {
 
     const result = response.data;
 
-    // Extract K-Type (adjust if structure differs)
     const ktypes = result?.Results?.TechnicalDetails?.KType || [];
 
     if (!ktypes || ktypes.length === 0) {
-      return res.status(404).json({ error: 'K-Type not found for reg', raw_response: result });
+      return res.status(404).json({
+        error: 'K-Type not found for reg',
+        raw_response: result
+      });
     }
 
-    // Optional: Load K-Type to SKU map (if needed)
     const mapRes = await axios.get('https://ktype-product-map.vercel.app/k_type_to_partnumber.json');
     const kTypeMap = mapRes.data;
+
     const skuList = kTypeMap[ktypes] || [];
 
     return res.status(200).json({
@@ -39,10 +40,12 @@ export default async function handler(req, res) {
     });
 
   } catch (error) {
-    console.error('API error:', error.message);
+    console.error('API failed:', error);
+
     return res.status(500).json({
       error: 'Internal server error',
-      detail: error?.response?.data || error.message
+      message: error.message,
+      detail: error.response?.data || 'No additional error data'
     });
   }
 }
